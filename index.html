@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Chess</title>
+<style>
+  :root{
+    --bg-page:#1a1a2e;
+    --light:#eeeed2;         /* light square */
+    --dark:#769656;          /* dark square */
+    --sel:#f6f669;           /* selected square (yellow) */
+    --move-dot:rgba(20,20,20,.35);   /* legal move dot */
+    --capture:rgba(235,80,60,.55);   /* capture outline */
+    --check:#e84a4a;         /* king-in-check highlight */
+    --last:rgba(246,246,105,.42);    /* last move trail */
+    --text-light:#f9f6f2;
+    --panel:#2b2b44;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    background:var(--bg-page);
+    font-family:"Helvetica Neue",Arial,sans-serif;
+    color:var(--text-light);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    min-height:100vh;padding:16px;gap:14px;
+    user-select:none;
+  }
+  .wrap{width:min(94vw,520px);}
+
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;}
+  .title{font-size:34px;font-weight:800;letter-spacing:-.5px;
+    text-shadow:0 2px 10px rgba(0,0,0,.35);}
+  .title .glyph{opacity:.85;}
+  .btns{display:flex;gap:8px;}
+  button{font-family:inherit;font-weight:700;cursor:pointer;border:none;border-radius:8px;
+    background:#5b7a3e;color:var(--text-light);padding:10px 16px;font-size:14px;
+    transition:background .15s, transform .05s;box-shadow:0 2px 6px rgba(0,0,0,.25);}
+  button:hover{background:#6b8f49;}
+  button:active{transform:scale(.96);}
+  button:disabled{opacity:.4;cursor:default;transform:none;}
+  .icon-btn{padding:10px 12px;font-size:16px;background:#3d3d5c;}
+  .icon-btn:hover{background:#4a4a70;}
+
+  /* Status bar above the board */
+  .status{background:var(--panel);border-radius:10px;padding:12px 16px;margin-bottom:12px;
+    display:flex;align-items:center;gap:10px;font-size:16px;font-weight:700;min-height:48px;
+    box-shadow:0 2px 8px rgba(0,0,0,.25);}
+  .status .turn-dot{width:16px;height:16px;border-radius:50%;flex:0 0 auto;
+    border:2px solid rgba(255,255,255,.5);}
+  .status.white-turn .turn-dot{background:#f4f4f4;}
+  .status.black-turn .turn-dot{background:#222;}
+  .status.danger{color:#ffd2d2;}
+  .status.done{color:#ffe58a;}
+
+  /* Board */
+  .board{position:relative;width:100%;aspect-ratio:1/1;border-radius:10px;overflow:hidden;
+    box-shadow:0 8px 30px rgba(0,0,0,.45);
+    display:grid;grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(8,1fr);}
+  .sq{position:relative;display:flex;align-items:center;justify-content:center;cursor:pointer;}
+  .sq.light{background:var(--light);}
+  .sq.dark{background:var(--dark);}
+  .sq.last::after{content:"";position:absolute;inset:0;background:var(--last);pointer-events:none;}
+  .sq.sel{background:var(--sel)!important;}
+  .sq.check::before{content:"";position:absolute;inset:0;
+    background:radial-gradient(circle,var(--check) 0%,rgba(232,74,74,.15) 70%,transparent 72%);
+    pointer-events:none;}
+
+  /* Coordinates in the corners of squares (like on lichess) */
+  .coord{position:absolute;font-size:10px;font-weight:700;opacity:.6;pointer-events:none;}
+  .coord.file{right:3px;bottom:2px;}
+  .coord.rank{left:3px;top:2px;}
+  .sq.light .coord{color:#769656;}
+  .sq.dark .coord{color:#eeeed2;}
+
+  /* Piece — Unicode glyph */
+  .piece{font-size:min(9vw,46px);line-height:1;position:relative;z-index:2;
+    text-shadow:0 1px 2px rgba(0,0,0,.25);cursor:grab;
+    transition:transform .05s;}
+  .piece.w{color:#ffffff;text-shadow:0 0 2px #000,0 1px 3px rgba(0,0,0,.6);}
+  .piece.b{color:#111111;text-shadow:0 0 2px rgba(255,255,255,.35);}
+
+  /* Legal-move markers */
+  .hint-dot{position:absolute;width:32%;height:32%;border-radius:50%;
+    background:var(--move-dot);z-index:1;pointer-events:none;}
+  .hint-capture{position:absolute;inset:6%;border-radius:50%;
+    border:5px solid var(--capture);z-index:1;pointer-events:none;}
+
+  /* End-of-game overlay */
+  .overlay{position:absolute;inset:0;z-index:10;
+    background:rgba(20,20,35,.82);color:var(--text-light);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+    opacity:0;pointer-events:none;transition:opacity .25s ease;text-align:center;padding:24px;}
+  .overlay.show{opacity:1;pointer-events:auto;}
+  .overlay h2{font-size:34px;font-weight:800;}
+  .overlay p{font-size:16px;opacity:.85;max-width:320px;}
+
+  .footer{margin-top:12px;font-size:13px;opacity:.65;text-align:center;line-height:1.5;}
+
+  @media (max-width:420px){
+    .title{font-size:26px;}
+    .status{font-size:14px;padding:10px 12px;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title"><span class="glyph">&#9812;</span> Chess</div>
+    <div class="btns">
+      <button class="icon-btn" id="sound" title="Move sound">&#128266;</button>
+      <button class="icon-btn" id="undo" title="Undo move">&#8630;</button>
+      <button id="new">New game</button>
+    </div>
+  </header>
+
+  <div class="status" id="status">
+    <span class="turn-dot"></span>
+    <span id="status-text">White to move</span>
+  </div>
+
+  <div class="board" id="board" data-turn="w" data-game-over="false" data-winner="">
+    <div class="overlay" id="overlay">
+      <h2 id="ov-title"></h2>
+      <p id="ov-sub"></p>
+      <button id="ov-new">New game</button>
+    </div>
+  </div>
+
+  <div class="footer">
+    Two players on one screen. Click a piece &rarr; its move squares light up &rarr; click a target.
+    The turn passes to the other side in order.
+  </div>
+</div>
+
+<!--
+  The chess.js library is loaded from a CDN as an ES module (this dist build only
+  ships as ESM, no UMD window.Chess global in this version — hence type="module" + import).
+  All chess logic (move rules, check, checkmate, stalemate, draw, validation) comes from chess.js.
+  We do NOT write it ourselves: our code only draws the board and wraps the library in a UI.
+  NOTE: when you open the page for the first time, you need internet so the browser can download
+  chess.js from the CDN.
+-->
+<script type="module">
+"use strict";
+import { Chess } from "https://cdn.jsdelivr.net/npm/chess.js@1.4.0/dist/esm/chess.js";
+
+/* ============================================================
+   Chess — a vanilla UI on top of the ready-made chess.js library.
+   L09 canon: do not reinvent the rules, use the ready-made ones and wrap them.
+   All checks (move legality, check/checkmate/stalemate/draw) are done by chess.js.
+   ============================================================ */
+
+/* ---- Pieces -> Unicode glyphs (§ display separated from logic) ----
+   chess.js returns a piece as {type:'p'|'n'|'b'|'r'|'q'|'k', color:'w'|'b'}.
+   We render WHITE glyphs for White, BLACK glyphs for Black, while the piece
+   color itself is set through CSS (.piece.w / .piece.b) — this keeps the glyph
+   always readable. */
+const GLYPH = {
+  w: { k:"♔", q:"♕", r:"♖", b:"♗", n:"♘", p:"♙" },
+  b: { k:"♚", q:"♛", r:"♜", b:"♝", n:"♞", p:"♟" }
+};
+
+const FILES = ["a","b","c","d","e","f","g","h"];  // files from left to right
+const RANKS = [8,7,6,5,4,3,2,1];                  // ranks from top to bottom (White at the bottom)
+
+/* ---- State ---- */
+const game = new Chess();     // ← the entire game "brain" lives here
+let selected = null;          // selected square ('e2') or null
+let legalTargets = [];        // legal moves from the selected square (verbose objects)
+let lastMove = null;          // {from,to} of the last move — for trail highlighting
+let gameOver = false;
+
+const $ = id => document.getElementById(id);
+const boardEl = $("board");
+const overlay = $("overlay");
+
+/* ---- Build the board squares once ---- */
+const squareEls = {};         // 'e4' -> square DOM element
+function buildBoard(){
+  for(let r=0;r<8;r++){
+    for(let f=0;f<8;f++){
+      const sq = FILES[f] + RANKS[r];                 // e.g. 'a8' ... 'h1'
+      const el = document.createElement("div");
+      el.className = "sq " + (((r+f)%2===0) ? "light" : "dark");
+      el.dataset.square = sq;
+      // coordinates along the edges (files at the bottom, ranks on the left)
+      if(r===7){ const c=document.createElement("span"); c.className="coord file"; c.textContent=FILES[f]; el.appendChild(c); }
+      if(f===0){ const c=document.createElement("span"); c.className="coord rank"; c.textContent=RANKS[r]; el.appendChild(c); }
+      el.addEventListener("click", ()=>onSquareClick(sq));
+      boardEl.appendChild(el);
+      squareEls[sq] = el;
+    }
+  }
+}
+
+/* ---- Render the position from chess.js.board() ----
+   board() returns an 8x8 2D array from top (8th rank) to bottom,
+   empty square = null, otherwise {square,type,color}. */
+function render(){
+  const position = game.board();
+  // clear squares of pieces and markers (do not touch coordinates or the overlay)
+  for(const sq in squareEls){
+    const el = squareEls[sq];
+    el.classList.remove("sel","last","check");
+    el.querySelectorAll(".piece,.hint-dot,.hint-capture").forEach(n=>n.remove());
+  }
+  // place pieces
+  for(let r=0;r<8;r++){
+    for(let f=0;f<8;f++){
+      const cell = position[r][f];
+      if(!cell) continue;
+      const sq = FILES[f] + RANKS[r];
+      const p = document.createElement("div");
+      p.className = "piece " + cell.color;   // .w or .b
+      p.textContent = GLYPH[cell.color][cell.type];
+      squareEls[sq].appendChild(p);
+    }
+  }
+  // last move trail
+  if(lastMove){
+    squareEls[lastMove.from]?.classList.add("last");
+    squareEls[lastMove.to]?.classList.add("last");
+  }
+  // king in check — highlight it
+  if(game.isCheck()){
+    const kingSq = findKing(game.turn());
+    if(kingSq) squareEls[kingSq]?.classList.add("check");
+  }
+  // selected square + move markers
+  if(selected){
+    squareEls[selected]?.classList.add("sel");
+    for(const mv of legalTargets){
+      const el = squareEls[mv.to];
+      if(!el) continue;
+      const mark = document.createElement("div");
+      // show captures (including en passant) as a ring, otherwise as a dot
+      const isCapture = mv.captured || mv.flags.includes("e");
+      mark.className = isCapture ? "hint-capture" : "hint-dot";
+      el.appendChild(mark);
+    }
+  }
+  updateStatus();
+}
+
+/* Find the king square for the given color (for check highlighting) */
+function findKing(color){
+  const position = game.board();
+  for(let r=0;r<8;r++)for(let f=0;f<8;f++){
+    const cell = position[r][f];
+    if(cell && cell.type==="k" && cell.color===color) return FILES[f]+RANKS[r];
+  }
+  return null;
+}
+
+/* ---- Click on a square ----
+   Human vs human: both sides play in turn on one screen.
+   Whose turn it is is determined by chess.js (game.turn(): "w" or "b").
+   You can select a piece from the side whose turn it currently is. */
+function onSquareClick(sq){
+  if(gameOver) return;
+  const side = game.turn();                 // "w" — White to move, "b" — Black to move
+
+  const position = game.board();
+  const clickedPiece = pieceAt(sq, position);
+
+  // 1) a piece is already selected and you click a legal target -> move
+  if(selected){
+    const target = legalTargets.find(m => m.to === sq);
+    if(target){
+      makeMove(target);
+      return;
+    }
+    // click another own piece (same side) -> reselect
+    if(clickedPiece && clickedPiece.color === side){
+      select(sq);
+      return;
+    }
+    // click elsewhere -> clear selection
+    clearSelection();
+    render();
+    return;
+  }
+
+  // 2) nothing selected -> select a piece for the side to move
+  if(clickedPiece && clickedPiece.color === side){
+    select(sq);
+  }
+}
+
+function pieceAt(sq, position){
+  const f = FILES.indexOf(sq[0]);
+  const r = RANKS.indexOf(Number(sq[1]));
+  if(r<0||f<0) return null;
+  return position[r][f];
+}
+
+/* Select a piece: ask chess.js for its LEGAL moves (verbose) */
+function select(sq){
+  selected = sq;
+  legalTargets = game.moves({ square: sq, verbose: true });  // ← the library provides legal moves
+  render();
+}
+function clearSelection(){
+  selected = null;
+  legalTargets = [];
+}
+
+/* ---- Make the player's move ---- */
+function makeMove(target){
+  // A pawn reaching the 8th rank -> promotion. For the reference version, always a queen.
+  const opts = { from: target.from, to: target.to };
+  if(target.promotion) opts.promotion = "q";
+  applyMove(opts);
+  clearSelection();
+  render();
+  checkEnd();
+  updateStatus();
+  // Human vs human: the turn passes to the other side, no computer move.
+}
+
+/* Generic wrapper around game.move(): chess.js in v1.x THROWS an exception
+   on an illegal move (instead of returning null), so we use try/catch. */
+function applyMove(move){
+  try{
+    const res = game.move(move);
+    if(res){
+      lastMove = { from: res.from, to: res.to };
+      playClick();
+    }
+    return res;
+  }catch(e){
+    console.warn("Illegal move rejected:", move, e.message);
+    return null;
+  }
+}
+
+/* ---- Check for end of game — entirely through chess.js ---- */
+function checkEnd(){
+  if(!game.isGameOver()) { updateStatus(); return false; }
+  gameOver = true;
+  let title, sub;
+  if(game.isCheckmate()){
+    const loser = game.turn();            // the side that has been checkmated (it is their turn now)
+    if(loser === "b"){ title = "Checkmate! White wins"; sub = "White checkmated Black."; }
+    else { title = "Checkmate! Black wins"; sub = "Black checkmated White."; }
+  } else if(game.isStalemate()){
+    title = "Stalemate"; sub = "No legal moves, but no check either — draw.";
+  } else if(game.isThreefoldRepetition()){
+    title = "Draw"; sub = "Threefold repetition of the position.";
+  } else if(game.isInsufficientMaterial()){
+    title = "Draw"; sub = "Not enough material to checkmate.";
+  } else if(game.isDraw()){
+    title = "Draw"; sub = "Fifty-move rule or a drawn position.";
+  } else {
+    title = "Game over"; sub = "";
+  }
+  showOverlay(title, sub);
+  updateStatus();
+  return true;
+}
+
+/* ---- Status bar ---- */
+function updateStatus(){
+  const st = $("status"), txt = $("status-text");
+  st.classList.remove("white-turn","black-turn","danger","done");
+  // data markers on the board — the "blind" opponent (the Playwright agent) reads them:
+  // whose turn it is, whether the game is over, who won. An explicit record in code, no "maybe".
+  boardEl.dataset.turn = game.turn();                 // "w" | "b"
+  boardEl.dataset.gameOver = String(game.isGameOver());  // "false" | "true"
+  boardEl.dataset.winner = game.isCheckmate()
+    ? (game.turn() === "w" ? "b" : "w")  // checkmate: the side that just moved won
+    : "";                                 // draw / game in progress -> empty
+  if(gameOver){
+    st.classList.add("done");
+    txt.textContent = game.isCheckmate() ? "Checkmate - game over"
+                    : game.isStalemate() ? "Stalemate - draw"
+                    : "Game over";
+    return;
+  }
+  const white = game.turn() === "w";
+  st.classList.add(white ? "white-turn" : "black-turn");
+  let text = white ? "White to move" : "Black to move";
+  if(game.isCheck()){
+    st.classList.add("danger");
+    text += " — CHECK!";
+  }
+  txt.textContent = text;
+}
+
+/* ---- Overlay ---- */
+function showOverlay(title, sub){
+  $("ov-title").textContent = title;
+  $("ov-sub").textContent = sub;
+  overlay.classList.add("show");
+}
+function hideOverlay(){ overlay.classList.remove("show"); }
+
+/* ---- New game ---- */
+function newGame(){
+  game.reset();                 // chess.js returns the starting position
+  selected = null; legalTargets = []; lastMove = null;
+  gameOver = false;
+  hideOverlay();
+  render();
+}
+
+/* ---- Undo move ----
+   We roll back two half-moves (computer move + our own), so White moves again. */
+function undoMove(){
+  const wasOver = gameOver;
+  game.undo();                  // undo one half-move (human vs human)
+  gameOver = false;
+  selected = null; legalTargets = [];
+  const hist = game.history({ verbose: true });
+  lastMove = hist.length ? { from: hist[hist.length-1].from, to: hist[hist.length-1].to } : null;
+  if(wasOver) hideOverlay();
+  render();
+}
+
+/* ---- Modest click sound (L09 canon: the sound is quiet/optional) ---- */
+let actx = null, soundOn = localStorage.getItem("chessSound") !== "0";
+function ensureAudio(){ if(!actx){ try{ actx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } }
+function playClick(){
+  if(!soundOn || !actx) return;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = "triangle"; o.frequency.value = 180;
+  g.gain.setValueAtTime(0, actx.currentTime);
+  g.gain.linearRampToValueAtTime(0.06, actx.currentTime + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + 0.08);
+  o.connect(g); g.connect(actx.destination);
+  o.start(); o.stop(actx.currentTime + 0.1);
+}
+
+/* ---- Buttons ---- */
+$("new").addEventListener("click", ()=>{ ensureAudio(); newGame(); });
+$("ov-new").addEventListener("click", ()=>{ ensureAudio(); newGame(); });
+$("undo").addEventListener("click", ()=>{ ensureAudio(); undoMove(); });
+$("sound").addEventListener("click", ()=>{
+  ensureAudio();
+  soundOn = !soundOn;
+  localStorage.setItem("chessSound", soundOn ? "1" : "0");
+  $("sound").textContent = soundOn ? "🔊" : "🔇";
+});
+$("sound").textContent = soundOn ? "🔊" : "🔇";
+// first click on the board — unlock AudioContext
+boardEl.addEventListener("click", ensureAudio, { once: true });
+
+/* ---- Start ---- */
+buildBoard();
+render();
+</script>
+</body>
+</html>
